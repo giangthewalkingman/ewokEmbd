@@ -224,6 +224,8 @@ class OffboardControl
 	std::vector<int> Indexwp;
 	bool gps_home_init = false, odom_init = false , setmode_init =false ,plan_init = false ,plan_fin =false;
 	std::vector<Eigen::Vector3d> local_setpoint_;
+	bool checkPosCmdError(double error, controller_msgs::PositionCommand target);
+	double distancePosCmdBetween(controller_msgs::PositionCommand target);
 };
 
 
