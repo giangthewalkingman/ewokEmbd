@@ -25,7 +25,7 @@ OffboardControl::OffboardControl(const ros::NodeHandle &nh, const ros::NodeHandl
     // setpoint_pose_pub_ = nh_.advertise<geometry_msgs::PoseStamped>("mavros/setpoint_position/local", 10);
     pos_cmd_ = nh_.advertise<controller_msgs::PositionCommand>("/controller/pos_cmd", 1);
     odom_error_pub_ = nh_.advertise<nav_msgs::Odometry>("odom_error", 1, true);
-    arming_client_ = nh_.serviceClient<mavros_msgs::CommandBool>("/mavros/cmd/arming");
+    arming_client_ = nh_.serviceClient<mavros_msgs::CommandBool>("/mavros/cmd_/arming");
     set_mode_client_ = nh_.serviceClient<mavros_msgs::SetMode>("/mavros/set_mode");
 
     nh_private_.param<bool>("/offboard_node/simulation_mode_enable", simulation_mode_enable_, simulation_mode_enable_);
@@ -210,6 +210,7 @@ void OffboardControl::odomCallback(const nav_msgs::Odometry::ConstPtr &msg) {
     tf::poseMsgToEigen(current_odom_.pose.pose, current_pose_);
     tf::vectorMsgToEigen(current_odom_.twist.twist.linear, current_velocity_);
     yaw_ = tf::getYaw(current_odom_.pose.pose.orientation);
+    mav_pos_ = toEigen(current_odom_.pose.pose.position);
     // std::cout << "\n[Debug] yaw from odom: " << degreeOf(yaw_) << "\n";
 }
 
@@ -277,16 +278,16 @@ void OffboardControl::inputPlannerAndLanding() {
     int count = end(target_array_.data) - begin(target_array_.data);
     num_of_enu_target_ = (count)/3;
     for(int i=0; i<num_of_enu_target_; i++) {
-        x_target_[i] = target_array_.data[i*3+0];
-        y_target_[i] = target_array_.data[i*3+1];
-        z_target_[i] = target_array_.data[i*3+2];
+        global_point_(0) = target_array_.data[i*3+0];
+        global_point_(1) = target_array_.data[i*3+1];
+        global_point_(2) = target_array_.data[i*3+2];
+        local_setpoint_.push_back(global_point_);
     }
     ros::Rate rate(10.0);
     std::printf("[ INFO] Loaded global path setpoints\n");
-    for (int i = 0; i < num_of_enu_target_; i++) {
-        std::printf(" Target (%d): [%.1f, %.1f, %.1f]\n", i + 1, x_target_[i], y_target_[i], z_target_[i]);
-        ros::spinOnce();
-        rate.sleep();
+    // rate.sleep();
+    for(auto lsp: local_setpoint_){
+    ROS_INFO_STREAM("local_setpoint" << lsp(0) << " " << lsp(1) << " " << lsp(2));
     }
     std::printf("\n[ INFO] Flight with Planner setpoint\n");
     std::printf("\n[ INFO] Flight to start point of Optimization path\n");
@@ -308,74 +309,35 @@ void OffboardControl::plannerAndLandingFlight() {
     double current_hold_x = current_odom_.pose.pose.position.x;
     double current_hold_y = current_odom_.pose.pose.position.y;
     double current_hold_z = current_odom_.pose.pose.position.z;
+    
 
     while (ros::ok()) {
-        setpoint = targetTransfer(x_target_[0], y_target_[0], z_target_[0]);
-        components_vel_ = velComponentsCalc(0.1, targetTransfer(current_odom_.pose.pose.position.x, current_odom_.pose.pose.position.y, current_odom_.pose.pose.position.z), setpoint); //vel_desired_
-        target_alpha = calculateYawOffset(targetTransfer(current_odom_.pose.pose.position.x, current_odom_.pose.pose.position.y, current_odom_.pose.pose.position.z), setpoint);
-
-        // test to know what direction drone need to spin
-        if ((yaw_ - target_alpha) >= PI) {
-            target_alpha += 2*PI;
-        }
-        else if ((yaw_ - target_alpha) <= -PI) {
-            target_alpha -= 2*PI;
-        }
-        else{}
-
-        // calculate the input for position controller (this_loop_alpha) so that the input yaw value will always be higher or lower than current yaw angle (yaw_) a value of yaw_rate_
-        // this make the drone yaw slower
-        if (target_alpha <= yaw_) {
-            if ((yaw_ - target_alpha) > yaw_rate_) {
-                this_loop_alpha = yaw_ - yaw_rate_;
+        if(!plan_init){
+       plan.setStart(mav_pos_,yaw_);
+       for(auto lsp : local_setpoint_)
+       plan.appendSetpoint(lsp);
+       plan.execute();
+       plan.getWpIndex(Indexwp);
+       sample_size = plan.getSize();
+       plan_init = true;
+       }
+       if(plan_init){
+            sample_idx ++;
+            if(sample_idx < sample_size)
+            {  
+                if(sample_idx > Indexwp[waypoint_idx]) waypoint_idx++;
+                cmd_.position = toGeometry_msgs(plan.getPos(sample_idx));
+                cmd_.velocity = toVector3(plan.getVel(sample_idx));
+                cmd_.acceleration = toVector3(plan.getAcc(sample_idx));
+                cmd_.yaw = plan.getYaw(sample_idx);
+                pos_cmd_.publish(cmd_);
+                // ROS_INFO_STREAM("Sec2 next waypoint " << (Indexwp[waypoint_idx] - sample_idx)*0.01 
+                // << " Sec to end " << (sample_size - sample_idx) *0.01);
             }
-            else {
-                this_loop_alpha = target_alpha;
-            }
+            else{
+                break;
+                }
         }
-        else {
-            if ((target_alpha-yaw_) > yaw_rate_) {
-                this_loop_alpha = yaw_ + yaw_rate_;
-            }
-            else {
-                this_loop_alpha = target_alpha;
-            }
-        }
-
-        // rotate at current position if yaw angle needed higher than 0.2 rad, otw exec both moving and yaw at the same time
-		if (abs(yaw_ - target_alpha) < 0.2) {	
-			target_enu_pose_.pose.orientation = tf::createQuaternionMsgFromYaw(this_loop_alpha);
-			target_enu_pose_.pose.position.x = current_odom_.pose.pose.position.x + components_vel_.x; 
-			target_enu_pose_.pose.position.y = current_odom_.pose.pose.position.y + components_vel_.y; 
-			target_enu_pose_.pose.position.z = current_odom_.pose.pose.position.z + components_vel_.z; 
-            // update the hold position // detail mention above
-            current_hold_x = current_odom_.pose.pose.position.x;
-            current_hold_y = current_odom_.pose.pose.position.y;
-            current_hold_z = current_odom_.pose.pose.position.z;
-		}
-		else {
-			target_enu_pose_.pose.orientation = tf::createQuaternionMsgFromYaw(this_loop_alpha);
-            //using the hold position as target help the drone reduce drift
-			target_enu_pose_.pose.position.x = current_hold_x;
-			target_enu_pose_.pose.position.y = current_hold_y;
-			target_enu_pose_.pose.position.z = current_hold_z;
-			std::printf("Rotating \n");
-		}
-
-        //distance between setpoint and current position < 0,5 m so keep current yaw and and vice versa
-        if((abs(setpoint.pose.position.x - current_odom_.pose.pose.position.x) < 0.5) && (abs(setpoint.pose.position.x - current_odom_.pose.pose.position.y) < 0.5)) {
-            target_enu_pose_.pose.orientation = tf::createQuaternionMsgFromYaw(yaw_);
-        }
-        else {
-            target_enu_pose_.pose.orientation = tf::createQuaternionMsgFromYaw(this_loop_alpha);
-        }
-
-        target_enu_pose_.header.stamp = ros::Time::now();
-        cmd_.position.x = target_enu_pose_.pose.position.x;
-        cmd_.position.x = target_enu_pose_.pose.position.y;
-        cmd_.position.x = target_enu_pose_.pose.position.z;
-        cmd_.yaw = this_loop_alpha;
-        pos_cmd_.publish(cmd_);
         // setpoint_pose_pub_.publish(target_enu_pose_);
         first_target_reached = checkPositionError(target_error_, setpoint);
 

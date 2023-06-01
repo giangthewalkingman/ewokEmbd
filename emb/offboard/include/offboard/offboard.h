@@ -217,6 +217,13 @@ class OffboardControl
 	// geometric_controller::setmode setModeCall;
 	controller_msgs::PositionCommand cmd_;
 	// geometric_controller::setmode setModeCall;
+	Eigen::Vector3d mav_pos_, global_point_;
+	TriangleForm plan;
+	int sample_idx=0,waypoint_idx=0;
+	int sample_size=0;
+	std::vector<int> Indexwp;
+	bool gps_home_init = false, odom_init = false , setmode_init =false ,plan_init = false ,plan_fin =false;
+	std::vector<Eigen::Vector3d> local_setpoint_;
 };
 
 
