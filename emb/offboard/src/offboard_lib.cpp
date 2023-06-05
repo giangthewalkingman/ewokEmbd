@@ -219,12 +219,13 @@ void OffboardControl::gpsPositionCallback(const sensor_msgs::NavSatFix::ConstPtr
     gps_received_ = true;
 }
 
-void OffboardControl::optPointCallback(const controller_msgs::PositionCommand::ConstPtr &msg) {
+void OffboardControl::optPointCallback(const geometry_msgs::Point::ConstPtr &msg) {
     // opt_point_ = *msg;
     // opt_point_ = *msg;
     opt_point_ = *msg;
     //optimization_point_.push_back(*msg);
     opt_point_received_ = true;
+    ROS_INFO_STREAM("Hello World");
 }
 
 void OffboardControl::targetPointCallback(const std_msgs::Float32MultiArray::ConstPtr &msg) {
@@ -250,25 +251,26 @@ void OffboardControl::checkIdsDetectionCallback(const std_msgs::Bool msg) {
 
 void OffboardControl::poseCallback(const geometry_msgs::PoseStamped::ConstPtr & msg) {
     current_position_ = *msg;
+    // ROS_INFO_STREAM("Hello World");
 }
 
 /* manage input: select mode, setpoint type, ... */
 void OffboardControl::inputSetpoint() {
-    std::printf("\n[ INFO] Please choose (1) to enter mode: Planning and Marker\n");
-    char mode;
-    std::printf("(1): ");
-    std::cin >> mode;
-    if (mode == '1') {
+    // std::printf("\n[ INFO] Please choose (1) to enter mode: Planning and Marker\n");
+    // char mode;
+    // std::printf("(1): ");
+    // std::cin >> mode;
+    // if (mode == '1') {
         std::printf("\n[ INFO] Mode 1: Mission with planner and marker\n");
         std::printf("[ INFO] Parameter 'return_home_mode_enable' is set %s\n", return_home_mode_enable_ ? "true" : "false");
         std::printf("[ INFO] Parameter 'delivery_mode_enable' is set %s\n", delivery_mode_enable_ ? "true" : "false");
         inputPlannerAndLanding();
-    }
-    else {
-        // std::printf("\n[ WARN] Not avaible mode\n");
-        // inputSetpoint();
-        ros::shutdown();
-    }
+    // }
+    // else {
+    //     // std::printf("\n[ WARN] Not avaible mode\n");
+    //     // inputSetpoint();
+    //     ros::shutdown();
+    // }
 }
 
 void OffboardControl::inputPlannerAndLanding() {
@@ -286,11 +288,11 @@ void OffboardControl::inputPlannerAndLanding() {
     std::printf("[ INFO] Loaded global path setpoints: \n");
     // rate.sleep();
     for(int i = 0; i < num_of_enu_target_; i++) {
-        std::cout << "Setpoint " << i+1 << target_array_.data[i*3+0] << ", " << target_array_.data[i*3+1] << ", " << target_array_.data[i*3+2] << ", " << std::endl;
+        std::cout << "Setpoint " << i+1 << ": " << target_array_.data[i*3+0] << ", " << target_array_.data[i*3+1] << ", " << target_array_.data[i*3+2] << ", " << std::endl;
     }
     std::printf("[ INFO] Loaded the start setpoint: \n");
     for(auto lsp: local_setpoint_){
-    ROS_INFO_STREAM("local_setpoint" << lsp(0) << " " << lsp(1) << " " << lsp(2));
+    ROS_INFO_STREAM("Start sp: " << lsp(0) << " " << lsp(1) << " " << lsp(2));
     }
     std::printf("\n[ INFO] Flight with Planner setpoint\n");
     std::printf("\n[ INFO] Flight to the start point of Optimization path\n");
@@ -302,7 +304,7 @@ void OffboardControl::plannerAndLandingFlight() {
     bool stop = false;
     bool final_reached = false;
     geometry_msgs::PoseStamped setpoint;
-    ros::Rate rate(50.0);
+    ros::Rate rate(100);
     //double curr_alpha_hover;
     bool first_receive_hover = true;
 
@@ -340,22 +342,24 @@ void OffboardControl::plannerAndLandingFlight() {
                 // ROS_INFO_STREAM("Sec2 next waypoint " << (Indexwp[waypoint_idx] - sample_idx)*0.01 
                 // << " Sec to end " << (sample_size - sample_idx) *0.01);
             }
-            else{
-                break;
-                }
+            // else{
+            //     break;
+            //     }
         }
         first_target_reached = checkPosCmdError(target_error_, cmd);
         distance_ = distancePosCmdBetween(cmd);
         std::printf("Distance to target: %.1f (m) \n", distance_);
 
-        if (first_target_reached) {
+        if (distance_ <= 0.3) {
             std::printf("\n[ INFO] Reached start point of Optimization path\n");
-            hovering(targetTransfer(global_point_(0), global_point_(1), global_point_(2)), 2.0);
+            // hovering(targetTransfer(global_point_(0), global_point_(1), global_point_(2)), 2.0);
             break;
         }
         ros::spinOnce();
         rate.sleep();
     }
+    hovering(targetTransfer(global_point_(0), global_point_(1), global_point_(2)), 10);
+    opt_point_received_ = true;
     yaw_rate_ = 0.15;
     first_target_reached = false;
     ros::Time current_time = ros::Time::now();
@@ -365,39 +369,49 @@ void OffboardControl::plannerAndLandingFlight() {
         double target_alpha, this_loop_alpha;
         bool flag = true;
         plan_init = false;
-        plan.setStart(mav_pos_,yaw_);
+        // plan.setStart(mav_pos_,yaw_);
         bool continue_to_append = true;
+        Eigen::Vector3d opt_3d_point_;
         while (ros::ok() && !stop) {
-            if(continue_to_append){
-                Eigen::Vector3d opt_3d_point_;
-                opt_3d_point_(0) = opt_point_.position.x;
-                opt_3d_point_(1) = opt_point_.position.y;
-                opt_3d_point_(2) = opt_point_.position.z;
-                // plan.setStart(mav_pos_,yaw_);
-                // for(auto lsp : local_setpoint_)
-                plan.appendSetpoint(opt_3d_point_);
-                plan.execute();
-                plan.getWpIndex(Indexwp);
-                sample_size = plan.getSize();
-                plan_init = true;
-                continue_to_append = false;
-            }
-                if(plan_init){
-                    sample_idx ++;
-                    if(sample_idx < sample_size)
-                    {  
-                        if(sample_idx > Indexwp[waypoint_idx]) waypoint_idx++;
-                        cmd_.position = toGeometry_msgs(plan.getPos(sample_idx));
-                        cmd_.velocity = toVector3(plan.getVel(sample_idx));
-                        cmd_.acceleration = toVector3(plan.getAcc(sample_idx));
-                        cmd_.yaw = plan.getYaw(sample_idx);
-                        pos_cmd_.publish(cmd_);
-                        continue_to_append = checkPosCmdError(target_error_, opt_point_);
-                    }
-                    else{
-                    //  break;
-                    }
-                }
+             std::cout << "cmd_: " << cmd_.position.x << ", " << cmd_.position.y << ", " << cmd_.position.z << ", " << std::endl;
+             std::cout << "opt_point_: " << opt_point_.x << ", " << opt_point_.y << ", " << opt_point_.z << ", " << std::endl;
+             std::cout << "opt_3d_point: " << opt_3d_point_(0) << ", " << opt_3d_point_(1) << ", " << opt_3d_point_(2) << ", " << std::endl;
+                        // std::cout << "opt_point_: " << opt_point_.x << ", " << opt_point_.y << ", " << opt_point_.z << ", " << std::endl;
+            // if(continue_to_append){
+            // if(1){
+            //     // Eigen::Vector3d opt_3d_point_;
+            //     opt_3d_point_(0) = opt_point_.x;
+            //     opt_3d_point_(1) = opt_point_.y;
+            //     opt_3d_point_(2) = opt_point_.z;
+            //     plan.setStart(mav_pos_,yaw_);
+            //     // for(auto lsp : local_setpoint_)
+            //     plan.appendSetpoint(opt_3d_point_);
+            //     plan.execute();
+            //     plan.getWpIndex(Indexwp);
+            //     sample_size = plan.getSize();
+            //     plan_init = true;
+            //     continue_to_append = false;
+            // }
+            //     if(plan_init){
+            //         sample_idx ++;
+            //         if(sample_idx < sample_size)
+            //         {  
+            //             if(sample_idx > Indexwp[waypoint_idx]) waypoint_idx++;
+            //             cmd_.position = toGeometry_msgs(plan.getPos(sample_idx));
+            //             cmd_.velocity = toVector3(plan.getVel(sample_idx));
+            //             cmd_.acceleration = toVector3(plan.getAcc(sample_idx));
+            //             cmd_.yaw = plan.getYaw(sample_idx);
+            //             pos_cmd_.publish(cmd_);
+            //             // std::cout << "cmd_: " << cmd_.position.x << ", " << cmd_.position.y << ", " << cmd_.position.z << ", " << std::endl;
+            //             // std::cout << "opt_point_: " << opt_point_.x << ", " << opt_point_.y << ", " << opt_point_.z << ", " << std::endl;
+            //             // continue_to_append = checkPosCmdError(target_error_, opt_point_);
+            //         }
+            //         else{
+            //         //  break;
+            //         }
+            //     }
+            cmd_.position = opt_point_;
+            pos_cmd_.publish(cmd_);
             final_reached = checkPositionError(target_error_, targetTransfer(target_array_.data[3], target_array_.data[4], target_array_.data[5]));
 
             if (final_reached && check_last_opt_point_.data) {
@@ -414,7 +428,7 @@ void OffboardControl::plannerAndLandingFlight() {
                     std::printf("\n[ INFO] No ids and Landing\n");
                     if (!return_home_mode_enable_) {
                         //landing(targetTransfer(setpoint.pose.position.x, setpoint.pose.position.y, 0.0));
-                        landingYaw(targetTransfer(setpoint.pose.position.x, setpoint.pose.position.y, 0.0, degreeOf(yaw_)));
+                        landingYaw(targetTransfer(current_odom_.pose.pose.position.x, current_odom_.pose.pose.position.y, 0.0, degreeOf(yaw_)));
                     }
                     else {
                         if (delivery_mode_enable_) {
@@ -733,7 +747,11 @@ void OffboardControl::landingYaw(geometry_msgs::PoseStamped setpoint) {
         target_enu_pose_ = targetTransfer(current_odom_.pose.pose.position.x + components_vel_.x, current_odom_.pose.pose.position.y + components_vel_.y, current_odom_.pose.pose.position.z + components_vel_.z, setpoint.pose.orientation);
         target_enu_pose_.header.stamp = ros::Time::now();
         // target_enu_pose_.pose.orientation = setpoint.pose.orientation;
-        setpoint_pose_pub_.publish(target_enu_pose_);
+        // setpoint_pose_pub_.publish(target_enu_pose_);
+        cmd_.position.x = target_enu_pose_.pose.position.x;
+        cmd_.position.y = target_enu_pose_.pose.position.y;
+        cmd_.position.z = target_enu_pose_.pose.position.z;
+        pos_cmd_.publish(cmd_);
 
         land_reached = checkPositionError(land_error_, setpoint);
 
@@ -787,54 +805,6 @@ geometry_msgs::Vector3 OffboardControl::velComponentsCalc(double v_desired, geom
     return vel;
 }
 
-/* calculate yaw offset between current position and next optimization position */
-double OffboardControl::calculateYawOffset(geometry_msgs::PoseStamped current, geometry_msgs::PoseStamped setpoint) {
-    double alpha;
-    double xc = current.pose.position.x;
-    double yc = current.pose.position.y;
-    double xs = setpoint.pose.position.x;
-    double ys = setpoint.pose.position.y;
-
-    alpha = atan2(abs(ys - yc), abs(xs - xc));
-    if ((xs > xc) && (ys > yc)) {
-        return alpha;
-    }
-    else if ((xs < xc) && (ys > yc)) {
-        return (PI - alpha);
-    }
-    else if ((xs < xc) && (ys < yc)) {
-        return (alpha - PI);
-    }
-    else if ((xs > xc) && (ys < yc)) {
-        return (-alpha);
-    }
-    else if ((xs == xc) && (ys > yc)) {
-        return alpha;
-    }
-    else if ((xs == xc) && (ys < yc)) {
-        return (-alpha);
-    }
-    else if ((xs > xc) && (ys == yc)) {
-        return alpha;
-    }
-    else if ((xs < xc) && (ys == yc)) {
-        return (PI - alpha);
-    }
-    else {
-        return alpha;
-    }
-}
-
-/* calculate distance between current position and setpoint position
-   input: current and target poses (ENU) to calculate distance */
-double OffboardControl::distanceBetween(geometry_msgs::PoseStamped current, geometry_msgs::PoseStamped target) {
-    Eigen::Vector3d distance;
-    distance << target.pose.position.x - current.pose.position.x,
-        target.pose.position.y - current.pose.position.y,
-        target.pose.position.z - current.pose.position.z;
-
-    return distance.norm();
-}
 double OffboardControl::distancePosCmdBetween(controller_msgs::PositionCommand target) {
     Eigen::Vector3d distance;
     distance << target.position.x - current_odom_.pose.pose.position.x,

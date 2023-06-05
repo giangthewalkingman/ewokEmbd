@@ -75,7 +75,7 @@ class OffboardControl
 	mavros_msgs::State current_state_; // current state from mavros, check connect (onboard-pixhawk), arm, flight mode, ...
 	geometry_msgs::PoseStamped home_enu_pose_; // pose to store the starting pose (position + orientation) of drone
 	geometry_msgs::PoseStamped target_enu_pose_; // target pose to feed into the drone
-	controller_msgs::PositionCommand opt_point_; // point (x,y,z) received from optimization planner
+	geometry_msgs::Point opt_point_; // point (x,y,z) received from optimization planner
 	std_msgs::Bool check_last_opt_point_; // check last optimization point have reached your destination yet.
 	
 	//DuyNguyen
@@ -136,7 +136,8 @@ class OffboardControl
 	void stateCallback(const mavros_msgs::State::ConstPtr& msg); // state callback
 	void odomCallback(const nav_msgs::Odometry::ConstPtr& msg); // odometry callback
 	void gpsPositionCallback(const sensor_msgs::NavSatFix::ConstPtr& msg); // GPS callback
-	void optPointCallback(const controller_msgs::PositionCommand::ConstPtr& msg); // optimization point callback
+	void optPointPCCallback(const controller_msgs::PositionCommand::ConstPtr& msg); // optimization point callback
+	void optPointCallback(const geometry_msgs::Point::ConstPtr& msg); // optimization point callback
 	void targetPointCallback(const std_msgs::Float32MultiArray::ConstPtr &msg); // target point callback
 	void checkLastOptPointCallback(const std_msgs::Bool::ConstPtr &msg); //check last optimization point callback
 

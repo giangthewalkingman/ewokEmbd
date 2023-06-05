@@ -40,9 +40,6 @@
 #include<geometry_msgs/PoseStamped.h>
 #include<std_msgs/Float32MultiArray.h>
 #include<std_msgs/Bool.h>
-// #include "geometric_controller/geometric_controller.h"
-#include <controller_msgs/PositionCommand.h>
-
 
 const int POW = 6;       
 
@@ -58,8 +55,6 @@ ros::Publisher occ_marker_pub, updated_marker_pub, free_marker_pub, dist_marker_
 tf::TransformListener * listener;
 
 geometry_msgs::Point last_ctrl_point;
-controller_msgs::PositionCommand cmd_;
-
 int target_num;
 double target_error_;
 bool odom_error_;
@@ -298,8 +293,7 @@ int main(int argc, char **argv) {
 
     // congtranv
     ros::Subscriber current_pose_sub = nh.subscribe<geometry_msgs::PoseStamped>("/mavros/local_position/pose", 50, currentPoseCallback);
-    // ros::Publisher point_pub = nh.advertise<geometry_msgs::Point>("optimization_point", 1);
-    ros::Publisher point_pub = nh.advertise<controller_msgs::PositionCommand>("optimization_point", 1);
+    ros::Publisher point_pub = nh.advertise<geometry_msgs::Point>("optimization_point", 1);
     ros::Publisher point_target_pub = nh.advertise<std_msgs::Float32MultiArray>("point_target",1);
     ros::Publisher check_last_opt_point_pub = nh.advertise<std_msgs::Bool>("check_last_opt_point",1);
 
@@ -432,21 +426,14 @@ int main(int argc, char **argv) {
         spline_opt.addLastControlPoint();
 
         std :: cout << "=============================================" << std::endl;
-        std :: cout << "First Control Point: \n";
-        ROS_INFO_STREAM(spline_opt.getFirstOptimizationPoint());
+        std :: cout << "First Control Point: \n" << spline_opt.getFirstOptimizationPoint() << std::endl;
         std :: cout << "=============================================" << std::endl;
         //std :: cout << "dt = " << dt << ", num_of_points = " << num_points << std :: endl;
 
-        // last_ctrl_point.x = spline_opt.getFirstOptimizationPoint().x();
-        // last_ctrl_point.y = spline_opt.getFirstOptimizationPoint().y();
-        // last_ctrl_point.z = spline_opt.getFirstOptimizationPoint().z();
-        cmd_.position.x = spline_opt.getFirstOptimizationPoint().x();
-        cmd_.position.y = spline_opt.getFirstOptimizationPoint().y();
-        cmd_.position.z = spline_opt.getFirstOptimizationPoint().z();
-        // point_pub.publish(last_ctrl_point);
-        point_pub.publish(cmd_);
-        
-
+        last_ctrl_point.x = spline_opt.getFirstOptimizationPoint().x();
+        last_ctrl_point.y = spline_opt.getFirstOptimizationPoint().y();
+        last_ctrl_point.z = spline_opt.getFirstOptimizationPoint().z();
+        point_pub.publish(last_ctrl_point);
         // DuyNguyen
         start_reached = checkPosition(target_error_, current_pose, targetTransfer(x_target[target_num-1], y_target[target_num-1], z_target[target_num-1]));
         ros::spinOnce();
