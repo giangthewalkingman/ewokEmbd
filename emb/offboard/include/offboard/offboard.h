@@ -2,6 +2,7 @@
 #define OFFBOARD_H_
 
 #include<ros/ros.h>
+#include<ros/transport_hints.h>
 #include<tf/tf.h>
 #include<tf/transform_datatypes.h>
 
@@ -30,6 +31,25 @@
 #include "geometric_controller/geometric_controller.h"
 #include <controller_msgs/PositionCommand.h>
 #include "geometric_controller/triangle_form.h"
+
+// #include "ros/ros.h"
+#include <cstdlib>
+// #include "geometric_controller/geometric_controller.h"
+// #include "geometric_controller/triangle_form.h"
+#include <nav_msgs/Odometry.h>
+// #include <mavros_msgs/SetMode.h>
+// #include <mavros_msgs/State.h>
+#include <controller_msgs/FlatTarget.h>
+// #include <controller_msgs/PositionCommand.h>
+
+#include <mavros_msgs/AttitudeTarget.h>
+#include <mavros_msgs/GPSRAW.h>
+#include <sensor_msgs/Imu.h>
+#include <geometry_msgs/Twist.h>
+#include <geometry_msgs/TwistStamped.h>
+
+#include <fstream>
+#include <yaml-cpp/yaml.h>
 
 class OffboardControl
 {
@@ -89,7 +109,7 @@ class OffboardControl
 	std_msgs::Float32MultiArray target_array_; // start point and end point received from optimization planner
 	std::vector<geometry_msgs::Point> optimization_point_; // point (x,y,z) list received from optimization planner, use when want to buffer and check reached each optimization point
 	sensor_msgs::NavSatFix current_gps_position_; // current GPS informations from mavros: status (satellite fix status information), Latitude [degrees](Positive is north of equator; negative is south), Longitude [degrees](Positive is east of prime meridian; negative is west), Altitude [m](Positive is above the WGS 84 ellipsoid), ...
-	sensor_msgs::NavSatFix home_gps_position_; // GPS position to store the starting point's GPS
+	// sensor_msgs::NavSatFix home_gps_position_; // GPS position to store the starting point's GPS
 	geographic_msgs::GeoPoseStamped goal_gps_position_; // goal GPS position to feed into the drone
 	sensor_msgs::NavSatFix ref_gps_position_; // reference GPS position to convert GPS position to ENU position (LLA to xyz)
 	mavros_msgs::SetMode flight_mode_; // use to set custom or default flight mode (e.g., OFFBOARD, LAND, ...)
@@ -134,7 +154,7 @@ class OffboardControl
 	void waitForArmAndOffboard(double hz); // wait for ARM and OFFBOARD mode switch (in SITL case or HITL/Practical case)
 	void waitForStable(double hz); // wait drone get a stable state
 	void stateCallback(const mavros_msgs::State::ConstPtr& msg); // state callback
-	void odomCallback(const nav_msgs::Odometry::ConstPtr& msg); // odometry callback
+	// void odomCallback(const nav_msgs::Odometry::ConstPtr& msg); // odometry callback
 	void gpsPositionCallback(const sensor_msgs::NavSatFix::ConstPtr& msg); // GPS callback
 	void optPointPCCallback(const controller_msgs::PositionCommand::ConstPtr& msg); // optimization point callback
 	void optPointCallback(const geometry_msgs::Point::ConstPtr& msg); // optimization point callback
@@ -218,7 +238,7 @@ class OffboardControl
 	// geometric_controller::setmode setModeCall;
 	controller_msgs::PositionCommand cmd_;
 	// geometric_controller::setmode setModeCall;
-	Eigen::Vector3d mav_pos_, global_point_;
+	Eigen::Vector3d mav_pos_, global_point_, mav_vel_;
 	TriangleForm plan;
 	int sample_idx=0,waypoint_idx=0;
 	int sample_size=0;
@@ -227,6 +247,21 @@ class OffboardControl
 	std::vector<Eigen::Vector3d> local_setpoint_;
 	bool checkPosCmdError(double error, controller_msgs::PositionCommand target);
 	double distancePosCmdBetween(controller_msgs::PositionCommand target);
+	std::vector<Eigen::Vector3d> gps_target_,local_setpoint_;
+	void gpsrawCallback(const sensor_msgs::NavSatFix &msg);
+	Eigen::Quaterniond mav_att_;
+	double mav_yaw_ = 0, mav_yawvel_ = 0;
+	Eigen::Vector3d gps_home_,gpsraw_,local_start_,offset_;
+	double ToEulerYaw(const Eigen::Quaterniond& q);
+	void odomCallback(const nav_msgs::Odometry &odomMsg);
+	double UTM_X_,UTM_Y_;
+	double UTM_SP_X_,UTM_SP_Y_;
+	// ros::Subscriber gpsSub_;
+	void triangleFLight(std::vector<Eigen::Vector3d> local_sp, double hz);
+	// bool check
+	bool checkPlanError(double error, Eigen::Vector3d x);
+	geometric_controller::setmode setModeCall;
+	ros::ServiceClient setModeClient;
 };
 
 
