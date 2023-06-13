@@ -18,8 +18,8 @@
 #include <visualization_msgs/MarkerArray.h>
 #include <image_transport/image_transport.h>
 #include<nav_msgs/Odometry.h>
-
-
+#include <std_msgs/Int32.h>
+#include <geometry_msgs/PoseArray.h>
 #include <fstream>
 #include <iostream>
 
@@ -67,6 +67,9 @@ bool start_reached = false;
 bool odom_error_reached = false;
 std_msgs::Float32MultiArray target_array;
 std_msgs::Bool check_last_opt_point;
+std::vector<Eigen::Vector3d> local3dsp_vector_;
+int local3dsp_num_;
+bool local3dsp_received_ = false;
 
 // DuyNguyen
 /***********************************************************
@@ -85,10 +88,10 @@ void currentPoseCallback(const geometry_msgs::PoseStamped::ConstPtr& msg) {
     current_pose = *msg;
 }
 
-void odomErrorCallback(const nav_msgs::Odometry::ConstPtr& msg) {
-    odom_error_reached = true;
-    odom_error = *msg;
-}
+// void odomErrorCallback(const nav_msgs::Odometry::ConstPtr& msg) {
+//     odom_error_reached = true;
+//     odom_error = *msg;
+// }
 
 geometry_msgs::PoseStamped targetTransfer(double x, double y, double z) {
     geometry_msgs::PoseStamped target;
@@ -115,6 +118,27 @@ bool checkPosition(double error, geometry_msgs::PoseStamped current, geometry_ms
 	{
 		return false;
 	}
+}
+
+void localSetpointVecArrCallback(const geometry_msgs::PoseArray::ConstPtr msg) {
+    geometry_msgs::PoseArray x = *msg;
+    local3dsp_vector_ = local3dspConvert(x);
+    // local3dsp_vector_ = ;
+    local3dsp_received_ = true;
+}
+// void localSetpointNumCallback(const std_msgs::Int32& msg) {
+//     local3dsp_num_ = msg.data;
+//     local3dsp_received_ = true;
+// }
+
+std::vector<Eigen::Vector3d> local3dspConvert(geometry_msgs::PoseArray x) {
+    std::vector<Eigen::Vector3d> y;
+    for(int i = 0; i < x.poses.size(); i++) {
+        y[i](0) = x.poses[i].position.x;
+        y[i](1) = x.poses[i].position.y;
+        y[i](2) = x.poses[i].position.z;
+    }
+    return y;
 }
 
 /*******************************************************************************/
@@ -277,7 +301,7 @@ int main(int argc, char **argv) {
 
 
 
-
+    
     double resolution;
     pnh.param("resolution", resolution, 0.15);
     edrb.reset(new ewok::EuclideanDistanceRingBuffer<POW>(resolution, 1.0));
@@ -293,16 +317,18 @@ int main(int argc, char **argv) {
 
     // congtranv
     ros::Subscriber current_pose_sub = nh.subscribe<geometry_msgs::PoseStamped>("/mavros/local_position/pose", 50, currentPoseCallback);
+    // ros::Subscriber local3dsp_sub = nh.subscribe<std::vector<Eigen::Vector3d>>("local_sp_vector3d_array", 1, localSetpointVecArrCallback);
+    // ros::Subscriber local3dsp_num = nh.subscribe<std_msgs::Int32>("local_sp_num", 1, localSetpointNumCallback);
     ros::Publisher point_pub = nh.advertise<geometry_msgs::Point>("optimization_point", 1);
     ros::Publisher point_target_pub = nh.advertise<std_msgs::Float32MultiArray>("point_target",1);
     ros::Publisher check_last_opt_point_pub = nh.advertise<std_msgs::Bool>("check_last_opt_point",1);
 
     //DuyNguyen
-    ros::Subscriber odom_error_sub = nh.subscribe<nav_msgs::Odometry>("odom_error", 1, odomErrorCallback);
+    // ros::Subscriber odom_error_sub = nh.subscribe<nav_msgs::Odometry>("odom_error", 1, odomErrorCallback);
 
-    nh.getParam("/spline_optimization_example/number_of_target", target_num);
+    // nh.getParam("/spline_optimization_example/number_of_target", target_num);
     nh.getParam("/spline_optimization_example/target_error", target_error_);
-    nh.getParam("/spline_optimization_example/odom_error", odom_error_);
+    // nh.getParam("/spline_optimization_example/odom_error", odom_error_);
     nh.getParam("/spline_optimization_example/x_pos", x_target);
     nh.getParam("/spline_optimization_example/y_pos", y_target);
     nh.getParam("/spline_optimization_example/z_pos", z_target);
@@ -310,143 +336,98 @@ int main(int argc, char **argv) {
     nh.getParam("/spline_optimization_example/dt_value", dt);
     
     std :: cout << "dt = " << dt << ", num_of_points = " << num_points << std :: endl;
-    if(odom_error_) {
-        while(ros::ok() && !odom_error_reached) {   
-            std::cout << "\nWaiting Odometry Error!\n" << std ::endl;
-            ros::spinOnce();
-        }
-        std::cout << "Odometry Error: " << odom_error.pose.pose.position << std ::endl;
-        for(int i=0; i<target_num; i++) {
-            x_target[i] += odom_error.pose.pose.position.x;
-            y_target[i] += odom_error.pose.pose.position.y;
-            z_target[i] += odom_error.pose.pose.position.z;
-        }
-    }
-
-    for(int i=0; i<target_num; i++) {
-        target_array.data.push_back(x_target[i]);
-        target_array.data.push_back(y_target[i]);
-        target_array.data.push_back(z_target[i]);
-    }
-
     // Set up global trajectory
-    // HM: const Eigen::Vector4d limits(0.5, 3, 0.2, 0);
-    // DuyNguyen: const Eigen::Vector4d limits(0.7, 4, 0.2, 0);
     const Eigen::Vector4d limits(0.5, 3, 0.2, 0); // ivsr velocity, acceleration, jerk, snap   //A row-vector containing the elements {0.7, 4, 0, 0} 
 
     ewok::Polynomial3DOptimization<10> po(limits*0.8);//0.8 ??? limits
     //
-    typename ewok::Polynomial3DOptimization<10>::Vector3Array vec;   //vec la mang cac vector3
-
+    // typename ewok::Polynomial3DOptimization<10>::Vector3Array vec;   //vec la mang cac vector3
+    typename ewok::Polynomial3DOptimization<10>::Vector3Array *vec_array = new typename ewok::Polynomial3DOptimization<10>::Vector3Array(local3dsp_vector_.size());
     std::cout << "Global setpoints to generate the global trajectory:\n" << std::endl;
-    for(int i=0; i<target_num; i++) {
-        vec.push_back(Eigen::Vector3d(x_target[i], y_target[i], z_target[i]));
-        std::cout << "Target (" << i+1 << "): ["<< x_target[i] << ", " << y_target[i] << ", " << z_target[i] << "]\n";
+    for(int i = 0; i < local3dsp_vector_.size() -1; i++) {
+        Eigen::Vector3d v1 = local3dsp_vector_[i];
+        Eigen::Vector3d v2 = local3dsp_vector_[i+1];
+        std::printf("Trajectory %d is: \n", i+1);
+        std::printf("( %d, %d, %d )\n", v1(0), v1(1), v1(2));
+        std::printf("( %d, %d, %d )\n", v2(0), v2(1), v2(2));
+        vec_array[i].push_back(v1);
+        vec_array[i].push_back(v2);
     }
-    std::cout << std::endl;
+    for(int i = 0; i < local3dsp_vector_.size() -1; i++) {
+        auto traj = po.computeTrajectory(vec_array[i]);
+        visualization_msgs::MarkerArray traj_marker;
+        traj->getVisualizationMarkerArray(traj_marker, "trajectory", Eigen::Vector3d(1, 1, 0), 0.5); //100
+        global_traj_pub.publish(traj_marker);
+        ewok::UniformBSpline3DOptimization<6> spline_opt(traj, dt);
+        spline_opt.addControlPoint(vec_array[i][0]);
+        spline_opt.setNumControlPointsOptimized(2);
+        spline_opt.setDistanceBuffer(edrb);
+        spline_opt.setDistanceThreshold(distance_threshold_);
+        spline_opt.setLimits(limits);
+        double tc = spline_opt.getClosestTrajectoryTime(Eigen::Vector3d(-3, -5, 1), 2.0);
+        ROS_INFO_STREAM("Closest time: " << tc);
+        ROS_INFO("Finished setting up data");
+        double current_time = 0;
+        double total_opt_time = 0;
+        int num_iterations = 0;
+        ros::Rate r(1.0/dt);
+        ewok::EuclideanDistanceRingBuffer<POW> rrb(0.1, 1.0);
+        while(ros::ok() && !start_reached) {
+            point_target_pub.publish(target_array);
+            start_reached = checkPosition(target_error_, current_pose, targetTransfer(vec_array[i][0].x(), vec_array[i][0].y(), vec_array[i][0].z()));
+            ros::spinOnce();
+        }
+        start_reached = false;
+        while (ros::ok() && !start_reached) {
+            r.sleep();
+            current_time += dt;
 
-    auto traj = po.computeTrajectory(vec);
+            visualization_msgs::MarkerArray before_opt_markers, after_opt_markers;
 
-    visualization_msgs::MarkerArray traj_marker;
-    traj->getVisualizationMarkerArray(traj_marker, "trajectory", Eigen::Vector3d(1, 1, 0), 0.5); //100
+            spline_opt.getMarkers(before_opt_markers, "before_opt",
+                                Eigen::Vector3d(1, 0, 0),
+                                Eigen::Vector3d(1, 0, 0));
 
-    global_traj_pub.publish(traj_marker);
+            auto t1 = std::chrono::high_resolution_clock::now();
+            double error = spline_opt.optimize();
+            auto t2 = std::chrono::high_resolution_clock::now();
 
-    // Set up spline optimization
-    // HM: const int num_points = 7;
-    //const int num_points = 10;
-    // DuyNguyen: const double dt = 0.5;
-    //const double dt = 0.4;
+            double miliseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(t2-t1).count() / 1.0e6;
 
-    ewok::UniformBSpline3DOptimization<6> spline_opt(traj, dt);
-
-    for (int i = 0; i < num_points; i++) {
-        spline_opt.addControlPoint(vec[0]);
-    }
-
-    spline_opt.setNumControlPointsOptimized(num_points);
-    spline_opt.setDistanceBuffer(edrb);
-    spline_opt.setDistanceThreshold(distance_threshold_);
-    spline_opt.setLimits(limits);
-
-
-    double tc = spline_opt.getClosestTrajectoryTime(Eigen::Vector3d(-3, -5, 1), 2.0);
-    ROS_INFO_STREAM("Closest time: " << tc);
-
-    ROS_INFO("Finished setting up data");
-
-    double current_time = 0;
-
-    double total_opt_time = 0;
-    int num_iterations = 0;
-
-    ros::Rate r(1.0/dt);
-
-    // congtranv
-    ewok::EuclideanDistanceRingBuffer<POW> rrb(0.1, 1.0);
-    while(ros::ok() && !start_reached) {
-        point_target_pub.publish(target_array);
-        //start_reached = checkPosition(1.0, current_pose, targetTransfer(vec[0].x(), vec[0].y(), vec[0].z()));
-        //start_reached = true;
-        start_reached = checkPosition(target_error_, current_pose, targetTransfer(vec[0].x(), vec[0].y(), vec[0].z()));
-        // std::cout << "\n" << targetTransfer(vec[0].x(), vec[0].y(), vec[0].z()).pose.position.x << ", " << targetTransfer(vec[0].x(), vec[0].y(), vec[0].z()).pose.position.y << ", " << targetTransfer(vec[0].x(), vec[0].y(), vec[0].z()).pose.position.z << "\n";
-        // std::cout << current_pose.pose.position.x << ", " << current_pose.pose.position.y << ", " << current_pose.pose.position.z << "\n";
-        ros::spinOnce();
-    }
-    start_reached = false;
-    // while (ros::ok() && current_time < traj->duration()) {
-    while (ros::ok() && !start_reached) {
-        r.sleep();
-        current_time += dt;
-
-        visualization_msgs::MarkerArray before_opt_markers, after_opt_markers;
-
-        spline_opt.getMarkers(before_opt_markers, "before_opt",
-                            Eigen::Vector3d(1, 0, 0),
-                            Eigen::Vector3d(1, 0, 0));
-
-        auto t1 = std::chrono::high_resolution_clock::now();
-        double error = spline_opt.optimize();
-        auto t2 = std::chrono::high_resolution_clock::now();
-
-        double miliseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(t2-t1).count() / 1.0e6;
-
-        total_opt_time += miliseconds;
-        num_iterations++;
+            total_opt_time += miliseconds;
+            num_iterations++;
 
 
-        ROS_INFO_STREAM("Finished optimization in " << miliseconds << " ms. Error: " << error);
+            ROS_INFO_STREAM("Finished optimization in " << miliseconds << " ms. Error: " << error);
 
-        spline_opt.getMarkers(after_opt_markers, "after_opt",
-                            Eigen::Vector3d(0, 1, 0),
-                            Eigen::Vector3d(0, 1, 1));
+            spline_opt.getMarkers(after_opt_markers, "after_opt",
+                                Eigen::Vector3d(0, 1, 0),
+                                Eigen::Vector3d(0, 1, 1));
 
-        after_opt_pub.publish(after_opt_markers);
+            after_opt_pub.publish(after_opt_markers);
 
-        spline_opt.addLastControlPoint();
+            spline_opt.addLastControlPoint();
 
-        std :: cout << "=============================================" << std::endl;
-        std :: cout << "First Control Point: \n" << spline_opt.getFirstOptimizationPoint() << std::endl;
-        std :: cout << "=============================================" << std::endl;
-        //std :: cout << "dt = " << dt << ", num_of_points = " << num_points << std :: endl;
+            std :: cout << "=============================================" << std::endl;
+            std :: cout << "First Control Point: \n" << spline_opt.getFirstOptimizationPoint() << std::endl;
+            std :: cout << "=============================================" << std::endl;
+            //std :: cout << "dt = " << dt << ", num_of_points = " << num_points << std :: endl;
 
-        last_ctrl_point.x = spline_opt.getFirstOptimizationPoint().x();
-        last_ctrl_point.y = spline_opt.getFirstOptimizationPoint().y();
-        last_ctrl_point.z = spline_opt.getFirstOptimizationPoint().z();
-        point_pub.publish(last_ctrl_point);
-        // DuyNguyen
-        start_reached = checkPosition(target_error_, current_pose, targetTransfer(x_target[target_num-1], y_target[target_num-1], z_target[target_num-1]));
-        ros::spinOnce();
-    }
-
-    while (ros::ok()) {
+            last_ctrl_point.x = spline_opt.getFirstOptimizationPoint().x();
+            last_ctrl_point.y = spline_opt.getFirstOptimizationPoint().y();
+            last_ctrl_point.z = spline_opt.getFirstOptimizationPoint().z();
+            point_pub.publish(last_ctrl_point);
+            // DuyNguyen
+            start_reached = checkPosition(target_error_, current_pose, targetTransfer(x_target[target_num-1], y_target[target_num-1], z_target[target_num-1]));
+            ros::spinOnce();
+        }
+            while (ros::ok()) {
         r.sleep();
         check_last_opt_point.data = true;
         check_last_opt_point_pub.publish(check_last_opt_point);
         std :: cout << "check_last_opt_point = " << check_last_opt_point.data << std::endl;
         ros::spinOnce();
     }
-
     f_time.close();
     opt_time.close();
     return 0;

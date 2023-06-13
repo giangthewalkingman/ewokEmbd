@@ -16,6 +16,7 @@
 #include<geometry_msgs/TwistStamped.h>
 #include<geographic_msgs/GeoPoseStamped.h>
 #include<sensor_msgs/NavSatFix.h>
+#include<geometry_msgs/PoseArray.h>
 
 #include<Eigen/Dense>
 
@@ -27,10 +28,13 @@
 #include<offboard/traj_gen.h>
 #include<std_msgs/Float32MultiArray.h>
 #include<std_msgs/Bool.h>
+#include<std_msgs/Int32.h>
 
 #include "geometric_controller/geometric_controller.h"
 #include <controller_msgs/PositionCommand.h>
 #include "geometric_controller/triangle_form.h"
+#include <geometry_msgs/Vector3.h>
+#include <geometry_msgs/Vector3Stamped.h>
 
 // #include "ros/ros.h"
 #include <cstdlib>
@@ -244,7 +248,7 @@ class OffboardControl
 	int sample_size=0;
 	std::vector<int> Indexwp;
 	bool gps_home_init = false, odom_init = false , setmode_init =false ,plan_init = false ,plan_fin =false;
-	std::vector<Eigen::Vector3d> local_setpoint_;
+	// std::vector<Eigen::Vector3d> local_setpoint_;
 	bool checkPosCmdError(double error, controller_msgs::PositionCommand target);
 	double distancePosCmdBetween(controller_msgs::PositionCommand target);
 	std::vector<Eigen::Vector3d> gps_target_,local_setpoint_;
@@ -261,7 +265,13 @@ class OffboardControl
 	// bool check
 	bool checkPlanError(double error, Eigen::Vector3d x);
 	geometric_controller::setmode setModeCall;
-	ros::ServiceClient setModeClient;
+	// ros::ServiceClient setModeClient;
+	ros::Publisher local_sp_vector_pub_;
+	ros::Publisher local_sp_num_pub_;
+	std_msgs::Int32 num_of_enu_msg_;
+	geometry_msgs::Vector3Stamped local3dsp_msg_;
+	// geometry_msgs::Point local3dspConvert(Eigen::Vector3d x);
+	geometry_msgs::PoseArray local3dspConvert(std::vector<Eigen::Vector3d> x);
 };
 
 
